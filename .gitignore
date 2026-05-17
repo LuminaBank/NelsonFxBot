@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Environment variables (NEVER upload this)
+.env
+
+# Session files (sensitive - contains your WhatsApp login)
+session/
+auth_info_baileys/
+auth_info/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Database files
+*.db
+*.sqlite
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+
+# Temp files
+tmp/
+temp/
+*.tmp
+
+# Cache
+.cache/
+
+# Build output
+dist/
+build/

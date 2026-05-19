@@ -7,14 +7,110 @@ const utils = require('./lib/utils')
 const db = require('./database/db')
 const fs = require('fs-extra')
 const path = require('path')
+const readline = require('readline')
 
 // ===========================
-// NelsonFxBot - Main Entry
+// NelsonFxBot — Main Entry
 // ===========================
 
+// ===========================
+// Readline Interface
+// For terminal/log interaction
+// ===========================
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout
+})
+
+const question = (prompt) => {
+  return new Promise((resolve) => {
+    rl.question(prompt, (answer) => {
+      resolve(answer.trim())
+    })
+  })
+}
+
+// ===========================
+// Check If Session Exists
+// ===========================
+const sessionExists = () => {
+  const sessionDir = config.sessionDir
+  const credsPath = path.join(sessionDir, 'creds.json')
+  // Check config.env SESSION_ID
+  if (config.sessionId && config.sessionId.startsWith('NELSONFX')) {
+    return true
+  }
+  // Check session folder
+  if (fs.existsSync(credsPath)) {
+    return true
+  }
+  return false
+}
+
+// ===========================
+// First Time Setup Wizard
+// ===========================
+const setupWizard = async () => {
+  console.clear()
+  console.log('\n')
+  console.log('╔══════════════════════════════════════════╗')
+  console.log('║           NelsonFxBot Setup              ║')
+  console.log('║       First Time Configuration           ║')
+  console.log('╚══════════════════════════════════════════╝')
+  console.log('\n')
+  console.log('👋 Welcome to NelsonFxBot!')
+  console.log('📱 No session found — let\'s connect your WhatsApp\n')
+  console.log('Choose connection method:\n')
+  console.log('  1️⃣  QR Code — Scan with WhatsApp camera')
+  console.log('  2️⃣  Pairing Code — Enter code in WhatsApp\n')
+
+  let choice = ''
+  while (!['1', '2'].includes(choice)) {
+    choice = await question('Enter 1 or 2: ')
+    if (!['1', '2'].includes(choice)) {
+      console.log('❌ Invalid choice! Enter 1 or 2\n')
+    }
+  }
+
+  if (choice === '1') {
+    console.log('\n✅ QR Code method selected!')
+    console.log('📱 Steps to scan:')
+    console.log('   1. Open WhatsApp on your phone')
+    console.log('   2. Tap ⋮ Menu → Linked Devices')
+    console.log('   3. Tap "Link a Device"')
+    console.log('   4. Scan the QR code that appears below\n')
+    return { method: 'qr', phone: null }
+  }
+
+  if (choice === '2') {
+    console.log('\n✅ Pairing Code method selected!')
+    console.log('📱 Steps after getting code:')
+    console.log('   1. Open WhatsApp on your phone')
+    console.log('   2. Tap ⋮ Menu → Linked Devices')
+    console.log('   3. Tap "Link a Device"')
+    console.log('   4. Tap "Link with phone number"')
+    console.log('   5. Enter the code shown below\n')
+
+    let phone = ''
+    while (!phone || phone.length < 7) {
+      phone = await question('📞 Enter your WhatsApp number (with country code, no +): ')
+      phone = phone.replace(/[^0-9]/g, '')
+      if (!phone || phone.length < 7) {
+        console.log('❌ Invalid number! Example: 2349138567333\n')
+      }
+    }
+
+    console.log(`\n✅ Number set: +${phone}`)
+    console.log('⏳ Starting connection...\n')
+    return { method: 'pairing', phone }
+  }
+}
+
+// ===========================
+// Main Start Function
+// ===========================
 const start = async () => {
   try {
-
     // ===========================
     // Print Startup Banner
     // ===========================
@@ -24,13 +120,7 @@ const start = async () => {
     // ===========================
     // Create Required Directories
     // ===========================
-    const dirs = [
-      './session',
-      './database',
-      './assets',
-      './tmp',
-      './logs'
-    ]
+    const dirs = ['./session', './database', './assets', './tmp', './logs']
     for (const dir of dirs) {
       utils.ensureDir(dir)
     }
@@ -39,69 +129,42 @@ const start = async () => {
     // ===========================
     // Initialize Database
     // ===========================
-    const settings = db.getSettings()
-    logger.info(`Database initialized ✅`)
-    logger.info(`Bot Mode: ${settings.botMode || config.mode}`)
-    logger.info(`Prefix: ${settings.prefix || config.prefix}`)
+    db.getSettings()
+    logger.info('Database initialized ✅')
 
     // ===========================
     // Verify Config
     // ===========================
     if (!config.ownerNumber) {
-      logger.error('Owner number is not set in .env file!')
-      process.exit(1)
-    }
-
-    if (!config.botName) {
-      logger.error('Bot name is not set in .env file!')
+      logger.error('OWNER_NUMBER not set in config.env!')
       process.exit(1)
     }
 
     logger.info(`Bot Name: ${config.botName}`)
     logger.info(`Owner: +${config.ownerNumber}`)
     logger.info(`Version: ${config.version}`)
-    logger.info(`Session Method: ${config.sessionMethod}`)
 
     // ===========================
-    // API Keys Check
+    // Check Session
     // ===========================
-    const apiStatus = {
-      'Gemini AI': !!config.geminiApiKey,
-      'Weather': !!config.weatherApiKey,
-      'News': !!config.newsApiKey,
-      'RemoveBG': !!config.removebgApiKey
-    }
+    let setupConfig = null
 
-    logger.info('API Keys Status:')
-    for (const [name, status] of Object.entries(apiStatus)) {
-      if (status) {
-        logger.success(`  ${name}: Connected ✅`)
-      } else {
-        logger.warn(`  ${name}: Not set ⚠️ (some features disabled)`)
-      }
+    if (!sessionExists()) {
+      // No session — run setup wizard
+      logger.warn('No session found — Starting setup wizard...')
+      await utils.sleep(1000)
+      setupConfig = await setupWizard()
+    } else {
+      logger.success('Session found — Connecting...')
     }
 
     // ===========================
     // Connect to WhatsApp
     // ===========================
-    logger.info('Connecting to WhatsApp...')
-
-    if (config.sessionMethod === 'qr') {
-      logger.info('Session method: QR Code')
-      logger.info('A QR code will appear below — scan it with WhatsApp!')
-      logger.info('WhatsApp > Linked Devices > Link a Device')
-    } else {
-      logger.info('Session method: Pairing Code')
-      logger.info(`Pairing code will be sent for number: +${config.botNumber}`)
-    }
-
-    await connectToWhatsApp()
+    await connectToWhatsApp(setupConfig)
 
   } catch (err) {
-    logger.error('Fatal startup error: ' + err.message)
-    logger.error(err.stack)
-
-    // Retry after 10 seconds
+    logger.error('Fatal error: ' + err.message)
     logger.info('Retrying in 10 seconds...')
     setTimeout(() => start(), 10000)
   }
@@ -112,7 +175,6 @@ const start = async () => {
 // ===========================
 process.on('uncaughtException', (err) => {
   logger.error('Uncaught Exception: ' + err.message)
-  logger.error(err.stack)
 })
 
 process.on('unhandledRejection', (err) => {
@@ -120,16 +182,16 @@ process.on('unhandledRejection', (err) => {
 })
 
 process.on('SIGTERM', () => {
-  logger.warn('SIGTERM received — shutting down gracefully')
+  logger.warn('SIGTERM — shutting down')
   process.exit(0)
 })
 
 process.on('SIGINT', () => {
-  logger.warn('SIGINT received — shutting down gracefully')
+  logger.warn('SIGINT — shutting down')
   process.exit(0)
 })
 
 // ===========================
-// Boot the Bot
+// Boot
 // ===========================
 start()
